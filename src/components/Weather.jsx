@@ -15,64 +15,66 @@ const Weather = ({ setAppTheme }) => {
     const [hourly, setHourly] = useState(null);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+    const [timezone, setTimezone] = useState(""); // Still storing timezone for hourly table
 
     const fetchWeather = async () => {
-    setError("");
-    setWeather(null);
-    setHourly(null);
-    setLoading(true);
-    try {
-        // Open-Meteo geocoding
-        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${location}&count=1`);
-        const geoData = await geoRes.json();
-        if (!geoData.results || !geoData.results.length) {
-            setError("Location not found");
-            setLoading(false);
-            return;
-        }
-
-        const { latitude: lat, longitude: lon } = geoData.results[0];
-
-        // Current weather
-        const data = await getWeather(lat, lon);
-        setWeather(data.current_weather);
-
-        // persist coords for 7-day view
+        setError("");
+        setWeather(null);
+        setHourly(null);
+        setTimezone("");
+        setLoading(true);
         try {
-            localStorage.setItem("lastCoords", JSON.stringify({ lat, lon }));
+            // Open-Meteo geocoding
+            const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${location}&count=1`);
+            const geoData = await geoRes.json();
+            if (!geoData.results || !geoData.results.length) {
+                setError("Location not found");
+                setLoading(false);
+                return;
+            }
+
+            const { latitude: lat, longitude: lon, timezone: tz } = geoData.results[0];
+            setTimezone(tz); // Save timezone for hourly forecast
+
+            // Current weather
+            const data = await getWeather(lat, lon);
+            setWeather(data.current_weather);
+
+            // persist coords for 7-day view
+            try {
+                localStorage.setItem("lastCoords", JSON.stringify({ lat, lon }));
+            } catch {
+                // Ignore localStorage errors
+            }
+
+            // Hourly forecast for next 24 hours
+            const hourlyData = await getHourlyForecast(lat, lon);
+            if (!hourlyData.hourly || !hourlyData.hourly.time) {
+                setHourly(null);
+            } else {
+                const now = new Date();
+                const next24 = now.getTime() + 24 * 60 * 60 * 1000;
+                const indices = hourlyData.hourly.time.map((t, idx) => {
+                    const d = new Date(t);
+                    return (d >= now && d.getTime() <= next24) ? idx : -1;
+                }).filter(i => i !== -1);
+                setHourly({
+                    time: indices.map(i => hourlyData.hourly.time[i]),
+                    temperature_2m: indices.map(i => hourlyData.hourly.temperature_2m[i]),
+                    weathercode: indices.map(i => hourlyData.hourly.weathercode?.[i] ?? 0)
+                });
+            }
+
+            const isDay = data.current_weather.is_day === 1;
+            const theme = getTheme(data.current_weather.weathercode, isDay);
+            setAppTheme(theme.bg);
+
         } catch {
-            // Ignore localStorage errors
+            setError("Something went wrong");
+        } finally {
+            setLoading(false);
         }
-
-        // Hourly forecast for next 24 hours
-        const hourlyData = await getHourlyForecast(lat, lon);
-        if (!hourlyData.hourly || !hourlyData.hourly.time) {
-            setHourly(null);
-        } else {
-            const now = new Date();
-            const next24 = now.getTime() + 24 * 60 * 60 * 1000;
-            const indices = hourlyData.hourly.time.map((t, idx) => {
-                const d = new Date(t);
-                return (d >= now && d.getTime() <= next24) ? idx : -1;
-            }).filter(i => i !== -1);
-            setHourly({
-                time: indices.map(i => hourlyData.hourly.time[i]),
-                temperature_2m: indices.map(i => hourlyData.hourly.temperature_2m[i]),
-                weathercode: indices.map(i => hourlyData.hourly.weathercode?.[i] ?? 0)
-            });
-        }
-
-        const isDay = data.current_weather.is_day === 1;
-        const theme = getTheme(data.current_weather.weathercode, isDay);
-        setAppTheme(theme.bg);
-
-    } catch {
-        setError("Something went wrong");
-    } finally {
-        setLoading(false);
-    }
-};
-
+    };
 
     const renderHourly = () => {
         if (!hourly) return null;
@@ -83,7 +85,11 @@ const Weather = ({ setAppTheme }) => {
                         <tr>
                             {hourly.time.map((time, idx) => (
                                 <th key={idx} className="px-2 py-1 text-xs whitespace-nowrap">
-                                    {new Date(time).getHours()}:00
+                                    {new Date(time).toLocaleTimeString('en-US', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        timeZone: timezone || 'UTC'
+                                    })}
                                 </th>
                             ))}
                         </tr>
@@ -117,8 +123,7 @@ const Weather = ({ setAppTheme }) => {
             <div>
                 <div className={`${theme.bg} rounded-xl p-6 shadow-2xl transform hover:scale-105 transition-transform duration-300 w-full`}>
                     <div className="flex flex-col items-center text-center">
-                        {/* New line for current location and time */}
-                        <p className="text-sm text-white">Location: {location || 'Unknown'} - Current Time: {new Date().toLocaleTimeString()}</p>
+                        <p className="text-sm text-white">Location: {location || 'Unknown'}</p>
 
                         {weatherIcons[weather.weathercode] ? (isDay ? weatherIcons[weather.weathercode].day : weatherIcons[weather.weathercode].night) : <WiDaySunny size={80} />}
                         <h2 className={`text-4xl font-bold mt-4 ${theme.text}`}>{weather.temperature}°C</h2>
@@ -126,8 +131,6 @@ const Weather = ({ setAppTheme }) => {
                         <p className={`mt-2 text-sm ${theme.text}`}>{feels.join(" • ")}</p>
                         <p className={`mt-1 text-sm ${theme.text}`}>Wind: {weather.windspeed} km/h | Direction: {weather.winddirection}°</p>
                     </div>
-
-                    {/* Hourly table */}
                 </div>
                 {renderHourly()}
             </div>
