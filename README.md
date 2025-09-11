@@ -25,5 +25,5 @@ Weather Now is built with React and uses an open weather API. Node.js is not req
 ## Contact
 
 - **Portfolio:** [https://anubhavv.onrender.com/](https://anubhavv.onrender.com/)
-- **Email:** anubhavv@default.com
+- **Email:** anubhavdhruv704@gmail.com
 
